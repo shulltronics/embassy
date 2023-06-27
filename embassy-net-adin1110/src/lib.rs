@@ -3,18 +3,14 @@
 #![feature(async_fn_in_trait)]
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
-use embedded_hal_1::digital::OutputPin;
-use heapless::Vec;
-
 use ch::driver::LinkState;
 use embassy_futures::select::{select, Either};
 use embassy_net_driver_channel as ch;
-use embedded_hal_async::{
-    digital::Wait,
-    spi::{Operation, SpiDevice},
-};
-
 use embassy_time::{Duration, Timer};
+use embedded_hal_1::digital::OutputPin;
+use embedded_hal_async::digital::Wait;
+use embedded_hal_async::spi::{Operation, SpiDevice};
+use heapless::Vec;
 
 mod crc32;
 mod crc8;
@@ -23,11 +19,10 @@ mod phy;
 mod regs;
 
 pub use crc32::ETH_FSC;
+use crc8::crc8;
 pub use mdio::MdioBus;
 pub use phy::{Phy10BaseT1x, RegsC22, RegsC45};
 pub use regs::{SpiRegisters as sr, CONFIG0, CONFIG2, STATUS0, STATUS1};
-
-use crc8::crc8;
 
 pub const PHYID: u32 = 0x0283BC91;
 
@@ -121,21 +116,11 @@ where
 
         let mut rx_buf = [0; 5];
 
-        let spi_read_len = if self.crc {
-            rx_buf.len()
-        } else {
-            rx_buf.len() - 1
-        };
+        let spi_read_len = if self.crc { rx_buf.len() } else { rx_buf.len() - 1 };
 
-        let mut spi_op = [
-            Operation::Write(&tx_buf),
-            Operation::Read(&mut rx_buf[0..spi_read_len]),
-        ];
+        let mut spi_op = [Operation::Write(&tx_buf), Operation::Read(&mut rx_buf[0..spi_read_len])];
 
-        self.spi
-            .transaction(&mut spi_op)
-            .await
-            .map_err(AdinError::Spi)?;
+        self.spi.transaction(&mut spi_op).await.map_err(AdinError::Spi)?;
 
         if self.crc {
             let crc = crc8(&rx_buf[0..4]);
@@ -232,10 +217,7 @@ where
             Operation::Read(spi_packet),
         ];
 
-        self.spi
-            .transaction(&mut spi_op)
-            .await
-            .map_err(AdinError::Spi)?;
+        self.spi.transaction(&mut spi_op).await.map_err(AdinError::Spi)?;
 
         Ok(packet_size as usize)
     }
@@ -270,9 +252,7 @@ where
             .extend_from_slice(u16::from(PORT_ID_BYTE).to_be_bytes().as_slice())
             .map_err(|_| AdinError::PACKET_TOO_BIG)?;
 
-        packet
-            .extend_from_slice(frame)
-            .map_err(|_| AdinError::PACKET_TOO_BIG)?;
+        packet.extend_from_slice(frame).map_err(|_| AdinError::PACKET_TOO_BIG)?;
 
         // Pad data up to 64
         for _ in packet.len()..(64 - FEC_LEN + header_len) {
@@ -332,15 +312,11 @@ where
         let mac_low_part = u32::from_be_bytes(mac[2..6].try_into().unwrap());
 
         // program our mac address in the mac address filter
-        self.write_reg(
-            sr::ADDR_FILT_UPR0,
-            (1 << 16) | (1 << 30) | u32::from(mac_high_part),
-        )
-        .await?;
+        self.write_reg(sr::ADDR_FILT_UPR0, (1 << 16) | (1 << 30) | u32::from(mac_high_part))
+            .await?;
         self.write_reg(sr::ADDR_FILT_LWR0, mac_low_part).await?;
 
-        self.write_reg(sr::ADDR_MSK_UPR0, u32::from(mac_high_part))
-            .await?;
+        self.write_reg(sr::ADDR_MSK_UPR0, u32::from(mac_high_part)).await?;
         self.write_reg(sr::ADDR_MSK_LWR0, mac_low_part).await?;
 
         // Also program broadcast address in the mac address filter
@@ -363,49 +339,33 @@ where
 
     /// Read from the PHY Registers as Clause 22.
     async fn read_cl22(&mut self, phy_id: u8, reg: u8) -> Result<u16, Self::Error> {
-        let mdio_acc_val: u32 = (0x1 << 28)
-            | u32::from(phy_id & 0x1F) << 21
-            | u32::from(reg & 0x1F) << 16
-            | (0x3 << 26);
+        let mdio_acc_val: u32 =
+            (0x1 << 28) | u32::from(phy_id & 0x1F) << 21 | u32::from(reg & 0x1F) << 16 | (0x3 << 26);
 
-        self.write_mdio_acc_reg(mdio_acc_val)
-            .await
-            .map(|val| val as u16)
+        self.write_mdio_acc_reg(mdio_acc_val).await.map(|val| val as u16)
     }
 
     /// Read from the PHY Registers as Clause 45.
     async fn read_cl45(&mut self, phy_id: u8, regc45: (u8, u16)) -> Result<u16, Self::Error> {
-        let mdio_acc_val: u32 =
-            u32::from(phy_id & 0x1F) << 21 | u32::from(regc45.0 & 0x1F) << 16 | u32::from(regc45.1);
+        let mdio_acc_val: u32 = u32::from(phy_id & 0x1F) << 21 | u32::from(regc45.0 & 0x1F) << 16 | u32::from(regc45.1);
 
         self.write_mdio_acc_reg(mdio_acc_val).await?;
 
-        let mdio_acc_val: u32 =
-            u32::from(phy_id & 0x1F) << 21 | u32::from(regc45.0 & 0x1F) << 16 | (0x03 << 26);
+        let mdio_acc_val: u32 = u32::from(phy_id & 0x1F) << 21 | u32::from(regc45.0 & 0x1F) << 16 | (0x03 << 26);
 
-        self.write_mdio_acc_reg(mdio_acc_val)
-            .await
-            .map(|val| val as u16)
+        self.write_mdio_acc_reg(mdio_acc_val).await.map(|val| val as u16)
     }
 
     /// Write to the PHY Registers as Clause 22.
     async fn write_cl22(&mut self, phy_id: u8, reg: u8, val: u16) -> Result<(), Self::Error> {
-        let mdio_acc_val: u32 = (0x1 << 28)
-            | u32::from(phy_id & 0x1F) << 21
-            | u32::from(reg & 0x1F) << 16
-            | (0x1 << 26)
-            | u32::from(val);
+        let mdio_acc_val: u32 =
+            (0x1 << 28) | u32::from(phy_id & 0x1F) << 21 | u32::from(reg & 0x1F) << 16 | (0x1 << 26) | u32::from(val);
 
         self.write_mdio_acc_reg(mdio_acc_val).await.map(|_| ())
     }
 
     /// Write to the PHY Registers as Clause 45.
-    async fn write_cl45(
-        &mut self,
-        phy_id: u8,
-        regc45: (u8, u16),
-        value: u16,
-    ) -> AEResult<(), SpiE> {
+    async fn write_cl45(&mut self, phy_id: u8, regc45: (u8, u16), value: u16) -> AEResult<(), SpiE> {
         let phy_id = u32::from(phy_id & 0x1F) << 21;
         let dev_addr = u32::from(regc45.0 & 0x1F) << 16;
         let reg = u32::from(regc45.1);
@@ -494,11 +454,7 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
                         if status1 & STATUS1::LINK_CHANGE != 0 {
                             let link = status1 & STATUS1::P1_LINK_STATUS != 0;
                             self.is_link_up = link;
-                            state_chan.set_link_state(if link {
-                                LinkState::Up
-                            } else {
-                                LinkState::Down
-                            });
+                            state_chan.set_link_state(if link { LinkState::Up } else { LinkState::Down });
                             #[cfg(feature = "defmt")]
                             defmt::trace!("LINK Changed: Link {}", link);
                             status1_clr |= STATUS1::LINK_CHANGE;
@@ -532,10 +488,7 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
 
                             let phy_irq_st = self
                                 .mac
-                                .read_cl45(
-                                    MDIO_PHY_ADDR,
-                                    RegsC45::DA1F::PHY_SYBSYS_IRQ_STATUS.into(),
-                                )
+                                .read_cl45(MDIO_PHY_ADDR, RegsC45::DA1F::PHY_SYBSYS_IRQ_STATUS.into())
                                 .await
                                 .unwrap();
                             #[cfg(feature = "defmt")]
@@ -567,21 +520,14 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
 }
 
 /// Obtain a driver for using the ADIN1110 with [`embassy-net`](crates.io/crates/embassy-net).
-pub async fn new<
-    'a,
-    const N_RX: usize,
-    const N_TX: usize,
-    SPI: SpiDevice,
-    INT: Wait,
-    RST: OutputPin,
->(
+pub async fn new<const N_RX: usize, const N_TX: usize, SPI: SpiDevice, INT: Wait, RST: OutputPin>(
     mac_addr: [u8; 6],
-    state: &'a mut State<N_RX, N_TX>,
+    state: &'_ mut State<N_RX, N_TX>,
     spi_dev: SPI,
     int: INT,
     mut reset: RST,
     crc: bool,
-) -> (Device<'a>, Runner<'a, SPI, INT, RST>) {
+) -> (Device<'_>, Runner<'_, SPI, INT, RST>) {
     use crate::regs::{IMASK0, IMASK1};
 
     #[cfg(feature = "defmt")]
@@ -614,10 +560,7 @@ pub async fn new<
     #[cfg(feature = "defmt")]
     defmt::debug!("SPE: CHIP: PHY ID: {:08x}", phy_id);
 
-    let mi_control = mac
-        .read_cl22(MDIO_PHY_ADDR, RegsC22::CONTROL as u8)
-        .await
-        .unwrap();
+    let mi_control = mac.read_cl22(MDIO_PHY_ADDR, RegsC22::CONTROL as u8).await.unwrap();
     #[cfg(feature = "defmt")]
     defmt::println!("SPE CHIP PHY MI_CONTROL {:04x}", mi_control);
     if mi_control & 0x0800 != 0 {
@@ -652,13 +595,8 @@ pub async fn new<
 
     // Set ADIN1110 Interrupts, RX_READY and LINK_CHANGE
     // Enable interrupts LINK_CHANGE, TX_RDY, RX_RDY(P1), SPI_ERR
-    let imask0_val = 0x0000_1FBF
-        & !(0
-            | IMASK0::TXFCSEM
-            | IMASK0::PHYINTM
-            | IMASK0::TXBOEM
-            | IMASK0::RXBOEM
-            | IMASK0::TXPEM);
+    let imask0_val =
+        0x0000_1FBF & !(0 | IMASK0::TXFCSEM | IMASK0::PHYINTM | IMASK0::TXBOEM | IMASK0::RXBOEM | IMASK0::TXPEM);
     mac.write_reg(sr::IMASK0, imask0_val).await.unwrap();
 
     // Set ADIN1110 Interrupts, RX_READY and LINK_CHANGE
@@ -688,585 +626,539 @@ pub async fn new<
     )
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use embedded_hal_mock::spi::{Mock as SpiMock, Transaction as SpiTransaction};
-
-//     #[test]
-//     fn mac_read_registers_without_crc() {
-//         // Configure expectations
-//         let expectations = [
-//             // Write request
-//             SpiTransaction::send(0x80),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x01),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(TURN_AROUND_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Read responce
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x02),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x83),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0xBC),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x91),
-//             // Write request
-//             SpiTransaction::send(0x80),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x02),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(TURN_AROUND_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Read responce
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x00),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x00),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x06),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0xC3),
-//         ];
-//         let spi = SpiMock::new(&expectations);
-
-//         let mut spe = Adin1110::new(spi, false);
-
-//         // Read PHIID
-//         match spe.read_reg(sr::PHYID) {
-//             Ok(val) => assert_eq!(val, 0x0283BC91),
-//             Err(_e) => panic!("Error:"),
-//         };
-
-//         // Read CAPAVILITY
-//         match spe.read_reg(sr::CAPABILITY) {
-//             Ok(val) => assert_eq!(val, 0x000006C3),
-//             Err(_e) => panic!("Error:"),
-//         };
-//     }
-
-//     #[test]
-//     fn mac_read_registers_with_crc() {
-//         // Configure expectations
-//         let expectations = [
-//             // Write request
-//             SpiTransaction::send(0x80),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x01),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(177), // CRC
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(TURN_AROUND_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Read responce
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x02),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x83),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0xBC),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x91),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(215), // CRC
-//             // Write request
-//             SpiTransaction::send(0x80),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x02),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(184), // CRC
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(TURN_AROUND_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Read responce
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x00),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x00),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0x06),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(0xC3),
-//             SpiTransaction::send(DONT_CARE_BYTE),
-//             SpiTransaction::read(57), // CRC
-//         ];
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, true);
-
-//         assert_eq!(crc8(0x0283BC91_u32.to_be_bytes().as_slice()), 215);
-//         assert_eq!(crc8(0x000006C3_u32.to_be_bytes().as_slice()), 57);
-
-//         // Read PHIID
-//         match spe.read_reg(sr::PHYID) {
-//             Ok(val) => assert_eq!(val, 0x0283BC91),
-//             Err(e) => panic!("Error: {e:?}"),
-//         };
-
-//         // Read CAPAVILITY
-//         match spe.read_reg(sr::CAPABILITY) {
-//             Ok(val) => assert_eq!(val, 0x000006C3),
-//             Err(_e) => panic!("Error:"),
-//         };
-//     }
-
-//     // #[test]
-//     // fn mac_write_registers_without_crc() {
-//     //     // Configure expectations
-//     //     let expectations = [
-//     //         SpiTransaction::transaction_start(),
-//     //         SpiTransaction::write_vec(vec![0xA1, 0xFF, 0x12, 0x34, 0x56, 0x78]),
-//     //         SpiTransaction::transaction_end(),
-//     //     ];
-//     //     let spi = SpiMock::new(&expectations);
-
-//     //     let cs = cs_pin_mock{};
-//     //     let mut spe = Adin1110::new(spi, cs, false);
-
-//     //     // Write reg: 0x1FFF
-//     //     assert!(spe.write_reg(0x01FF, 0x1234_5678).is_ok());
-//     // }
-
-//     // #[test]
-//     // fn mac_write_registers_with_crc() {
-//     //     // Configure expectations
-//     //     let expectations = [
-//     //         SpiTransaction::transaction_start(),
-//     //         SpiTransaction::write_vec(vec![0xA1, 0xFF, 167, 0x12, 0x34, 0x56, 0x78, 55]),
-//     //         SpiTransaction::transaction_end(),
-//     //     ];
-//     //     let spi = SpiMock::new(&expectations);
-
-//     //     let cs = cs_pin_mock{};
-//     //     let mut spe = Adin1110::new(spi, cs, true);
-
-//     //     // Write reg: 0x1FFF
-//     //     assert!(spe.write_reg(0x01FF, 0x1234_5678).is_ok());
-//     // }
-
-//     #[test]
-//     fn align_size() {
-//         assert_eq!(size_align_u32(1), 4);
-//         assert_eq!(size_align_u32(2), 4);
-//         assert_eq!(size_align_u32(3), 4);
-//         assert_eq!(size_align_u32(4), 4);
-//         assert_eq!(size_align_u32(5), 8);
-//         assert_eq!(size_align_u32(6), 8);
-//         assert_eq!(size_align_u32(7), 8);
-//         assert_eq!(size_align_u32(8), 8);
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_less_64b_with_crc() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(136),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(66),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(201),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(64, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..65 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[8, 137, 18, 4] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, true);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_less_64b_no_crc() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(66),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(64, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..64 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[8, 137, 18, 4] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_1500b() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x05),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0xDE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(1500, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[212, 114, 18, 50] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_65b() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(67),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(65, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..64 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[54, 117, 221, 220] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_66b() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(68),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(66, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..64 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[97, 167, 100, 29] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_67b() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(69),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         packet.resize(67, 0).unwrap();
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..64 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[228, 218, 170, 232] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-
-//     #[test]
-//     fn write_packet_to_fifo_arp_46bytes() {
-//         // Configure expectations
-//         let mut expectations = vec![
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x30),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Frame Size
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(66),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // HEADER
-//             SpiTransaction::send(0xA0),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(0x31),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             // Port
-//             SpiTransaction::send(0x00),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//             SpiTransaction::send(PORT_ID_BYTE),
-//             SpiTransaction::read(DONT_CARE_BYTE),
-//         ];
-
-//         let mut packet = Packet::new();
-//         //arp packet;
-//         packet
-//             .extend_from_slice(&[
-//                 0, 0, 0, 0, 34, 51, 68, 85, 102, 119, 18, 52, 86, 120, 154, 188, 8, 6, 0, 1, 8, 0,
-//                 6, 4, 0, 2, 18, 52, 86, 120, 154, 188, 192, 168, 16, 4, 34, 51, 68, 85, 102, 119,
-//                 192, 168, 16, 1,
-//             ])
-//             .unwrap();
-
-//         assert_eq!(packet.len(), 46);
-
-//         for &byte in &packet[4..] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // padding
-//         for _ in packet.len() as u32..64 {
-//             expectations.push(SpiTransaction::send(0x00));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         // fcs
-//         for &byte in &[147, 149, 213, 68] {
-//             expectations.push(SpiTransaction::send(byte));
-//             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
-//         }
-
-//         let spi = SpiMock::new(&expectations);
-
-//         let cs = CsPinMock {};
-//         let mut spe = Adin1110::new(spi, cs, false);
-
-//         assert!(spe.write_fifo(&mut packet).is_ok());
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use core::convert::Infallible;
+
+    use embedded_hal_1::digital::{ErrorType, OutputPin};
+    use embedded_hal_async::spi::ExclusiveDevice;
+    use embedded_hal_mock::spi::{Mock as SpiMock, Transaction as SpiTransaction};
+
+    #[derive(Debug, Default)]
+    struct CsPinMock {
+        pub high: u32,
+        pub low: u32,
+    }
+    impl OutputPin for CsPinMock {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            self.low += 1;
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            self.high += 1;
+            Ok(())
+        }
+    }
+    impl ErrorType for CsPinMock {
+        type Error = Infallible;
+    }
+
+    use super::*;
+
+    #[futures_test::test]
+    async fn mac_read_registers_without_crc() {
+        // Configure expectations
+        let expectations = [
+            // 1st
+            SpiTransaction::write_vec(vec![0x80, 0x01, TURN_AROUND_BYTE]),
+            SpiTransaction::read_vec(vec![0x02, 0x83, 0xBC, 0x91]),
+            SpiTransaction::flush(),
+            // 2nd
+            SpiTransaction::write_vec(vec![0x80, 0x02, TURN_AROUND_BYTE]),
+            SpiTransaction::read_vec(vec![0x00, 0x00, 0x06, 0xC3]),
+            SpiTransaction::flush(),
+        ];
+        let spi = SpiMock::new(&expectations);
+
+        let cs = CsPinMock::default();
+        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let mut spe = ADIN1110::new(spi_dev, false);
+
+        // Read PHIID
+        match spe.read_reg(sr::PHYID).await {
+            Ok(val) => assert_eq!(val, 0x0283BC91),
+            Err(_e) => panic!("Error:"),
+        };
+
+        // Read CAPAVILITY
+        match spe.read_reg(sr::CAPABILITY).await {
+            Ok(val) => assert_eq!(val, 0x000006C3),
+            Err(_e) => panic!("Error:"),
+        };
+    }
+
+    #[futures_test::test]
+    async fn mac_read_registers_with_crc() {
+        // Configure expectations
+        let expectations = [
+            // 1st
+            SpiTransaction::write_vec(vec![0x80, 0x01, 177, TURN_AROUND_BYTE]),
+            SpiTransaction::read_vec(vec![0x02, 0x83, 0xBC, 0x91, 215]),
+            SpiTransaction::flush(),
+            // 2nd
+            SpiTransaction::write_vec(vec![0x80, 0x02, 184, TURN_AROUND_BYTE]),
+            SpiTransaction::read_vec(vec![0x00, 0x00, 0x06, 0xC3, 57]),
+            SpiTransaction::flush(),
+        ];
+        let spi = SpiMock::new(&expectations);
+
+        let cs = CsPinMock::default();
+        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let mut spe = ADIN1110::new(spi_dev, true);
+
+        assert_eq!(crc8(0x0283BC91_u32.to_be_bytes().as_slice()), 215);
+        assert_eq!(crc8(0x000006C3_u32.to_be_bytes().as_slice()), 57);
+
+        // Read PHIID
+        match spe.read_reg(sr::PHYID).await {
+            Ok(val) => assert_eq!(val, 0x0283BC91),
+            Err(e) => panic!("Error: {e:?}"),
+        };
+
+        // Read CAPAVILITY
+        match spe.read_reg(sr::CAPABILITY).await {
+            Ok(val) => assert_eq!(val, 0x000006C3),
+            Err(_e) => panic!("Error:"),
+        };
+    }
+
+    #[futures_test::test]
+    async fn mac_write_registers_without_crc() {
+        // Configure expectations
+        let expectations = [
+            SpiTransaction::write_vec(vec![0xA0, 0x09, 0x12, 0x34, 0x56, 0x78]),
+            SpiTransaction::flush(),
+        ];
+        let spi = SpiMock::new(&expectations);
+
+        let cs = CsPinMock::default();
+        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let mut spe = ADIN1110::new(spi_dev, false);
+
+        // Write reg: 0x1FFF
+        assert!(spe.write_reg(sr::STATUS1, 0x1234_5678).await.is_ok());
+    }
+
+    #[futures_test::test]
+    async fn mac_write_registers_with_crc() {
+        // Configure expectations
+        let expectations = [
+            SpiTransaction::write_vec(vec![0xA0, 0x09, 39, 0x12, 0x34, 0x56, 0x78, 28]),
+            SpiTransaction::flush(),
+        ];
+        let spi = SpiMock::new(&expectations);
+
+        let cs = CsPinMock::default();
+        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let mut spe = ADIN1110::new(spi_dev, true);
+
+        // Write reg: 0x1FFF
+        assert!(spe.write_reg(sr::STATUS1, 0x1234_5678).await.is_ok());
+    }
+
+    #[test]
+    fn align_size() {
+        assert_eq!(size_align_u32(1), 4);
+        assert_eq!(size_align_u32(2), 4);
+        assert_eq!(size_align_u32(3), 4);
+        assert_eq!(size_align_u32(4), 4);
+        assert_eq!(size_align_u32(5), 8);
+        assert_eq!(size_align_u32(6), 8);
+        assert_eq!(size_align_u32(7), 8);
+        assert_eq!(size_align_u32(8), 8);
+    }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_less_64b_with_crc() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(136),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(66),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(201),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(64, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // padding
+    //         for _ in packet.len() as u32..65 {
+    //             expectations.push(SpiTransaction::send(0x00));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[8, 137, 18, 4] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, true);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_less_64b_no_crc() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(66),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(64, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // padding
+    //         for _ in packet.len() as u32..64 {
+    //             expectations.push(SpiTransaction::send(0x00));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[8, 137, 18, 4] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, false);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_1500b() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x05),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0xDE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(1500, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[212, 114, 18, 50] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, false);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_65b() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(67),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(65, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // padding
+    //         for _ in packet.len() as u32..64 {
+    //             expectations.push(SpiTransaction::send(0x00));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[54, 117, 221, 220] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, false);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_66b() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(68),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(66, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // padding
+    //         for _ in packet.len() as u32..64 {
+    //             expectations.push(SpiTransaction::send(0x00));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[97, 167, 100, 29] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, false);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    //     #[test]
+    //     fn write_packet_to_fifo_67b() {
+    //         // Configure expectations
+    //         let mut expectations = vec![
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x30),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Frame Size
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(69),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // HEADER
+    //             SpiTransaction::send(0xA0),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(0x31),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             // Port
+    //             SpiTransaction::send(0x00),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //             SpiTransaction::send(PORT_ID_BYTE),
+    //             SpiTransaction::read(DONT_CARE_BYTE),
+    //         ];
+
+    //         let mut packet = Packet::new();
+    //         packet.resize(67, 0).unwrap();
+
+    //         for &byte in &packet[4..] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // padding
+    //         for _ in packet.len() as u32..64 {
+    //             expectations.push(SpiTransaction::send(0x00));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+
+    //         // fcs
+    //         for &byte in &[228, 218, 170, 232] {
+    //             expectations.push(SpiTransaction::send(byte));
+    //             expectations.push(SpiTransaction::read(DONT_CARE_BYTE));
+    //         }
+    //         let spi = SpiMock::new(&expectations);
+
+    //         let cs = CsPinMock {};
+    //         let mut spe = Adin1110::new(spi, cs, false);
+
+    //         assert!(spe.write_fifo(&mut packet).is_ok());
+    //     }
+
+    #[futures_test::test]
+    async fn write_packet_to_fifo_arp_46bytes() {
+        // Configure expectations
+        let mut expectations = vec![];
+
+        let mut packet = Packet::new();
+        //arp packet;
+        packet
+            .extend_from_slice(&[
+                34, 51, 68, 85, 102, 119, 18, 52, 86, 120, 154, 188, 8, 6, 0, 1, 8, 0, 6, 4, 0, 2, 18, 52, 86, 120,
+                154, 188, 192, 168, 16, 4, 34, 51, 68, 85, 102, 119, 192, 168, 16, 1,
+            ])
+            .unwrap();
+
+        let mut spi_packet = Packet::new();
+
+        // Write TX_SIZE reg
+        expectations.push(SpiTransaction::write_vec(vec![160, 48, 136, 0, 0, 0, 66, 201]));
+        expectations.push(SpiTransaction::flush());
+
+        // Write TX reg.
+        // Header
+        spi_packet.extend_from_slice(&[160, 49, 143, 0, 0]).unwrap();
+        // Packet data
+        spi_packet.extend_from_slice(&packet).unwrap();
+        // Packet padding up to 60 (64 - FCS)
+        for _ in packet.len() as u32..60 {
+            spi_packet.push(0x00).unwrap();
+        }
+        // Packet FCS
+        spi_packet.extend_from_slice(&[147, 149, 213, 68]).unwrap();
+
+        // SPI HEADER Padding of u32
+        for _ in spi_packet.len() as u32..size_align_u32(spi_packet.len() as u32) {
+            spi_packet.push(0x00).unwrap();
+        }
+
+        expectations.push(SpiTransaction::write_vec(spi_packet.to_vec()));
+        expectations.push(SpiTransaction::flush());
+
+        let spi = SpiMock::new(&expectations);
+
+        let cs = CsPinMock::default();
+        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let mut spe = ADIN1110::new(spi_dev, true);
+
+        assert!(spe.write_fifo(&mut packet).await.is_ok());
+    }
+}
