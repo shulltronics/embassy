@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {
     "rust-analyzer.check.command": "clippy",
     "rust-analyzer.showUnlinkedFileNotification": false,
@@ -5,4 +6,15 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.formatOnSave": true
     }
+=======
+{
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.showUnlinkedFileNotification": false,
+    // "rust-analyzer.check.targets": ["thumbv7em-none-eabihf"],
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    }
+  
+>>>>>>> 6405a49a (ADIN1110: Uncomment and update some tests.)
 }
