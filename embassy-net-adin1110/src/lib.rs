@@ -631,6 +631,7 @@ mod tests {
     use core::convert::Infallible;
 
     use embedded_hal_1::digital::{ErrorType, OutputPin};
+    use embedded_hal_async::delay::DelayUs;
     use embedded_hal_async::spi::ExclusiveDevice;
     use embedded_hal_mock::spi::{Mock as SpiMock, Transaction as SpiTransaction};
 
@@ -656,6 +657,20 @@ mod tests {
 
     use super::*;
 
+    // TODO: This is currently a workaround unit `ExclusiveDevice` is moved to `embedded-hal-bus`
+    // see https://github.com/rust-embedded/embedded-hal/pull/462#issuecomment-1560014426
+    struct MockDelay {}
+
+    impl DelayUs for MockDelay {
+        async fn delay_us(&mut self, _us: u32) {
+            todo!()
+        }
+
+        async fn delay_ms(&mut self, _ms: u32) {
+            todo!()
+        }
+    }
+
     #[futures_test::test]
     async fn mac_read_registers_without_crc() {
         // Configure expectations
@@ -672,7 +687,8 @@ mod tests {
         let spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
-        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let delay = MockDelay {};
+        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
         let mut spe = ADIN1110::new(spi_dev, false);
 
         // Read PHIID
@@ -704,7 +720,9 @@ mod tests {
         let spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
-        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let delay = MockDelay {};
+        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+
         let mut spe = ADIN1110::new(spi_dev, true);
 
         assert_eq!(crc8(0x0283BC91_u32.to_be_bytes().as_slice()), 215);
@@ -733,7 +751,9 @@ mod tests {
         let spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
-        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let delay = MockDelay {};
+        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+
         let mut spe = ADIN1110::new(spi_dev, false);
 
         // Write reg: 0x1FFF
@@ -750,7 +770,9 @@ mod tests {
         let spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
-        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let delay = MockDelay {};
+        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+
         let mut spe = ADIN1110::new(spi_dev, true);
 
         // Write reg: 0x1FFF
@@ -1156,7 +1178,9 @@ mod tests {
         let spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
-        let spi_dev = ExclusiveDevice::new(spi, cs);
+        let delay = MockDelay {};
+        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+
         let mut spe = ADIN1110::new(spi_dev, true);
 
         assert!(spe.write_fifo(&mut packet).await.is_ok());
