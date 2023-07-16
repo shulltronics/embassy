@@ -34,11 +34,46 @@ pub enum SpiRegisters {
     RX = 0x91,
 }
 
-impl SpiRegisters {
-    pub fn from(&self) -> u16 {
-        *self as u16
+impl Into<u16> for SpiRegisters {
+    fn into(self) -> u16 {
+        self as u16
     }
 }
+
+impl From<u16> for SpiRegisters {
+    fn from(value: u16) -> Self {
+        match value {
+            0x00 => Self::IDVER,
+            0x01 => Self::PHYID,
+            0x02 => Self::CAPABILITY,
+            0x03 => Self::RESET,
+            0x04 => Self::CONFIG0,
+            0x06 => Self::CONFIG2,
+            0x08 => Self::STATUS0,
+            0x09 => Self::STATUS1,
+            0x0C => Self::IMASK0,
+            0x0D => Self::IMASK1,
+            0x20 => Self::MDIO_ACC,
+            0x30 => Self::TX_FSIZE,
+            0x31 => Self::TX,
+            0x32 => Self::TX_SPACE,
+            0x36 => Self::FIFO_CLR,
+            0x50 => Self::ADDR_FILT_UPR0,
+            0x51 => Self::ADDR_FILT_LWR0,
+            0x52 => Self::ADDR_FILT_UPR1,
+            0x53 => Self::ADDR_FILT_LWR1,
+            0x70 => Self::ADDR_MSK_LWR0,
+            0x71 => Self::ADDR_MSK_UPR0,
+            0x72 => Self::ADDR_MSK_LWR1,
+            0x73 => Self::ADDR_MSK_UPR1,
+            0x90 => Self::RX_FSIZE,
+            0x91 => Self::RX,
+            e => panic!("Unknown value {e}"),
+        }
+    }
+}
+
+// Register definitions
 
 bitfield! {
     /// Status0 Register bits
@@ -351,5 +386,22 @@ impl LedPolarity {
         pub from into LedPol, led1_polarity, set_led1_polarity: 3, 2;
         /// LED_0 Polarity
         pub from into LedPol, led0_polarity, set_led0_polarity: 1, 0;
+    }
+}
+
+/// LED Control Register
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct SpiHeader(pub u16);
+bitfield_bitrange! {struct SpiHeader(u16)}
+
+impl SpiHeader {
+    bitfield_fields! {
+        u16;
+        /// Mask Bit for TXF_ECC_ERR
+        pub control, set_control : 15;
+        pub full_duplex, set_full_duplex : 14;
+        pub write, set_write : 13;
+        /// LED_0 Polarity
+        pub from into SpiRegisters, addr, set_addr: 11, 0;
     }
 }

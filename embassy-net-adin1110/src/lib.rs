@@ -24,7 +24,7 @@ pub use mdio::MdioBus;
 pub use phy::{Phy10BaseT1x, RegsC22, RegsC45};
 pub use regs::{Config0, Config2, SpiRegisters as sr, Status0, Status1};
 
-use crate::regs::{LedCntrl, LedFunc, LedPol, LedPolarity};
+use crate::regs::{LedCntrl, LedFunc, LedPol, LedPolarity, SpiHeader};
 
 pub const PHYID: u32 = 0x0283BC91;
 
@@ -95,9 +95,6 @@ where
     SPI: SpiDevice<u8, Error = SpiE>,
     SpiE: core::fmt::Debug,
 {
-    const ADIN1110_CD: u16 = 0x8000;
-    const ADIN1110_WB: u16 = 0x2000;
-
     pub fn new(spi: SPI, crc: bool) -> Self {
         Self { spi, crc }
     }
@@ -105,8 +102,10 @@ where
     pub async fn read_reg(&mut self, reg: sr) -> AEResult<u32, SpiE> {
         let mut tx_buf = Vec::<u8, 16>::new();
 
-        let spi_hdr = Self::ADIN1110_CD | reg.from();
-        let _ = tx_buf.extend_from_slice(spi_hdr.to_be_bytes().as_slice());
+        let mut spi_hdr = SpiHeader(0);
+        spi_hdr.set_control(true);
+        spi_hdr.set_addr(reg);
+        let _ = tx_buf.extend_from_slice(spi_hdr.0.to_be_bytes().as_slice());
 
         if self.crc {
             // Add CRC for header data
@@ -142,9 +141,11 @@ where
     pub async fn write_reg(&mut self, reg: sr, value: u32) -> AEResult<(), SpiE> {
         let mut tx_buf = Vec::<u8, 16>::new();
 
-        let spi_hdr = Self::ADIN1110_CD | Self::ADIN1110_WB | reg.from();
-
-        let _ = tx_buf.extend_from_slice(spi_hdr.to_be_bytes().as_slice());
+        let mut spi_hdr = SpiHeader(0);
+        spi_hdr.set_control(true);
+        spi_hdr.set_write(true);
+        spi_hdr.set_addr(reg);
+        let _ = tx_buf.extend_from_slice(spi_hdr.0.to_be_bytes().as_slice());
 
         if self.crc {
             // Add CRC for header data
@@ -195,9 +196,10 @@ where
             return Err(AdinError::PACKET_TOO_BIG);
         }
 
-        let reg = Self::ADIN1110_CD | sr::RX.from();
-
-        let _ = tx_buf.extend_from_slice(reg.to_be_bytes().as_slice());
+        let mut spi_hdr = SpiHeader(0);
+        spi_hdr.set_control(true);
+        spi_hdr.set_addr(sr::RX);
+        let _ = tx_buf.extend_from_slice(spi_hdr.0.to_be_bytes().as_slice());
 
         if self.crc {
             // Add CRC for header data
@@ -232,10 +234,13 @@ where
 
         let mut packet = Packet::new();
 
-        let reg = Self::ADIN1110_CD | Self::ADIN1110_WB | sr::TX.from();
-        //packet[0..2].copy_from_slice(reg.to_be_bytes().as_slice());
+        let mut spi_hdr = SpiHeader(0);
+        spi_hdr.set_control(true);
+        spi_hdr.set_write(true);
+        spi_hdr.set_addr(sr::TX);
+
         packet
-            .extend_from_slice(reg.to_be_bytes().as_slice())
+            .extend_from_slice(spi_hdr.0.to_be_bytes().as_slice())
             .map_err(|_| AdinError::PACKET_TOO_BIG)?;
 
         if self.crc {
@@ -453,9 +458,33 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
                         if status1.link_change() {
                             let link = status1.p1_link_status();
                             self.is_link_up = link;
-                            state_chan.set_link_state(if link { LinkState::Up } else { LinkState::Down });
+
                             #[cfg(feature = "defmt")]
-                            defmt::trace!("LINK Changed: Link {}", link);
+                            if link {
+                                let link_status = self
+                                    .mac
+                                    .read_cl45(MDIO_PHY_ADDR, RegsC45::DA7::AN_STATUS_EXTRA.into())
+                                    .await
+                                    .unwrap();
+
+                                let volt = if link_status & (0b11 << 5) == (0b11 << 5) {
+                                    "2.4"
+                                } else {
+                                    "1.0"
+                                };
+
+                                let mse = self
+                                    .mac
+                                    .read_cl45(MDIO_PHY_ADDR, RegsC45::DA1::MSE_VAL.into())
+                                    .await
+                                    .unwrap();
+
+                                defmt::info!("LINK Changed: Link Up, Volt: {} V p-p, MSE: {:0004}", volt, mse);
+                            } else {
+                                defmt::info!("LINK Changed: Link Down");
+                            }
+
+                            state_chan.set_link_state(if link { LinkState::Up } else { LinkState::Down });
                             status1_clr.set_link_change(true);
                         }
 
