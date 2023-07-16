@@ -22,7 +22,9 @@ pub use crc32::ETH_FSC;
 use crc8::crc8;
 pub use mdio::MdioBus;
 pub use phy::{Phy10BaseT1x, RegsC22, RegsC45};
-pub use regs::{SpiRegisters as sr, CONFIG0, CONFIG2, STATUS0, STATUS1};
+pub use regs::{Config0, Config2, SpiRegisters as sr, Status0, Status1};
+
+use crate::regs::{LedCntrl, LedFunc, LedPol, LedPolarity};
 
 pub const PHYID: u32 = 0x0283BC91;
 
@@ -239,7 +241,6 @@ where
         if self.crc {
             assert_eq!(header_len, 5);
             // Add CRC for header data
-            //packet[2] = crc8(&packet[0..2]);
             packet
                 .push(crc8(&packet[0..2]))
                 .map_err(|_| AdinError::PACKET_TOO_BIG)?;
@@ -286,8 +287,6 @@ where
 
         // Spi packet must be half word / even length
         if send_len & 1 != 0 {
-            // #[cfg(feature = "defmt")]
-            // defmt::println!("Make packet length even!");
             let _ = packet.push(0x00);
         }
 
@@ -399,10 +398,10 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
                 defmt::debug!("Waiting for interrupts");
                 match select(self.int.wait_for_low(), tx_chan.tx_buf()).await {
                     Either::First(_) => {
-                        let mut status1_clr = 0x00;
-                        let mut status1 = self.mac.read_reg(sr::STATUS1).await.unwrap();
+                        let mut status1_clr = Status1(0);
+                        let mut status1 = Status1(self.mac.read_reg(sr::STATUS1).await.unwrap());
 
-                        while status1 & STATUS1::P1_RX_RDY != 0 {
+                        while status1.p1_rx_rdy() {
                             #[cfg(feature = "defmt")]
                             defmt::debug!("alloc RX packet buffer");
                             match select(rx_chan.rx_buf(), tx_chan.tx_buf()).await {
@@ -436,50 +435,50 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
                                     tx_chan.tx_done();
                                 }
                             }
-                            status1 = self.mac.read_reg(sr::STATUS1).await.unwrap();
+                            status1 = Status1(self.mac.read_reg(sr::STATUS1).await.unwrap());
                         }
 
-                        let status0 = self.mac.read_reg(sr::STATUS0).await.unwrap();
-                        if status1 & !0x1b != 0 {
+                        let status0 = Status0(self.mac.read_reg(sr::STATUS0).await.unwrap());
+                        if status1.0 & !0x1b != 0 {
                             #[cfg(feature = "defmt")]
-                            defmt::error!("SPE CHIP STATUS 0:{:08x} 1:{:08x}", status0, status1);
+                            defmt::error!("SPE CHIP STATUS 0:{:08x} 1:{:08x}", status0.0, status1.0);
                         }
 
-                        if status1 & STATUS1::TX_RDY != 0 {
-                            status1_clr |= STATUS1::TX_RDY;
+                        if status1.tx_rdy() {
+                            status1_clr.set_tx_rdy(true);
                             #[cfg(feature = "defmt")]
                             defmt::info!("TX_DONE");
                         }
 
-                        if status1 & STATUS1::LINK_CHANGE != 0 {
-                            let link = status1 & STATUS1::P1_LINK_STATUS != 0;
+                        if status1.link_change() {
+                            let link = status1.p1_link_status();
                             self.is_link_up = link;
                             state_chan.set_link_state(if link { LinkState::Up } else { LinkState::Down });
                             #[cfg(feature = "defmt")]
                             defmt::trace!("LINK Changed: Link {}", link);
-                            status1_clr |= STATUS1::LINK_CHANGE;
+                            status1_clr.set_link_change(true);
                         }
 
-                        if status1 & STATUS1::TX_ECC_ERR != 0 {
+                        if status1.tx_ecc_err() {
                             #[cfg(feature = "defmt")]
                             defmt::error!("SPI TX_ECC_ERR error, CLEAR TX FIFO");
                             self.mac.write_reg(sr::FIFO_CLR, 2).await.unwrap();
-                            status1_clr |= STATUS1::TX_ECC_ERR;
+                            status1_clr.set_tx_ecc_err(true);
                         }
 
-                        if status1 & STATUS1::RX_ECC_ERR != 0 {
+                        if status1.rx_ecc_err() {
                             #[cfg(feature = "defmt")]
                             defmt::error!("SPI RX_ECC_ERR error");
-                            status1_clr |= STATUS1::RX_ECC_ERR;
+                            status1_clr.set_rx_ecc_err(true);
                         }
 
-                        if status1 & STATUS1::SPI_ERR != 0 {
+                        if status1.spi_err() {
                             #[cfg(feature = "defmt")]
                             defmt::error!("SPI SPI_ERR CRC error");
-                            status1_clr |= STATUS1::SPI_ERR;
+                            status1_clr.set_spi_err(true);
                         }
 
-                        if status0 & STATUS0::PHYINT != 0 {
+                        if status0.phyint() {
                             let crsm_irq_st = self
                                 .mac
                                 .read_cl45(MDIO_PHY_ADDR, RegsC45::DA1E::CRSM_IRQ_STATUS.into())
@@ -499,14 +498,14 @@ impl<'d, SPI: SpiDevice, INT: Wait, RST: OutputPin> Runner<'d, SPI, INT, RST> {
                             );
                         }
 
-                        if status0 & STATUS0::TXFCSE != 0 {
+                        if status0.txfcse() {
                             #[cfg(feature = "defmt")]
                             defmt::error!("SPE CHIP PHY TX Frame CRC error");
                         }
 
                         // Clear status0
                         self.mac.write_reg(sr::STATUS0, 0xFFF).await.unwrap();
-                        self.mac.write_reg(sr::STATUS1, status1_clr).await.unwrap();
+                        self.mac.write_reg(sr::STATUS1, status1_clr.0).await.unwrap();
                     }
                     Either::Second(packet) => {
                         // Handle frames that needs to transmit to the wire.
@@ -528,7 +527,7 @@ pub async fn new<const N_RX: usize, const N_TX: usize, SPI: SpiDevice, INT: Wait
     mut reset: RST,
     crc: bool,
 ) -> (Device<'_>, Runner<'_, SPI, INT, RST>) {
-    use crate::regs::{IMASK0, IMASK1};
+    use crate::regs::{IMask0, IMask1};
 
     #[cfg(feature = "defmt")]
     defmt::info!("INIT ADIN1110");
@@ -573,8 +572,9 @@ pub async fn new<const N_RX: usize, const N_TX: usize, SPI: SpiDevice, INT: Wait
     }
 
     // Config2: CRC_APPEND
-    let config2 = 0x0000_0800 | CONFIG2::CRC_APPEND;
-    mac.write_reg(sr::CONFIG2, config2).await.unwrap();
+    let mut config2 = Config2(0x00000800);
+    config2.set_crc_append(true);
+    mac.write_reg(sr::CONFIG2, config2.0).await.unwrap();
 
     // Pin Mux Config 1
     let led_val = (0b11 << 6) | (0b11 << 4); // | (0b00 << 1);
@@ -582,33 +582,52 @@ pub async fn new<const N_RX: usize, const N_TX: usize, SPI: SpiDevice, INT: Wait
         .await
         .unwrap();
 
+    let mut led_pol = LedPolarity(0);
+    led_pol.set_led1_polarity(LedPol::ActiveLow);
+    led_pol.set_led0_polarity(LedPol::ActiveLow);
+
     // Led Polarity Regisgere Active Low
-    mac.write_cl45(MDIO_PHY_ADDR, RegsC45::DA1E::LED_POLARITY.into(), 0b1010)
+    mac.write_cl45(MDIO_PHY_ADDR, RegsC45::DA1E::LED_POLARITY.into(), led_pol.0)
         .await
         .unwrap();
 
     // Led Both On
-    let led_val = 0b1000_0000_1000_0000 | (16 << 8);
-    mac.write_cl45(MDIO_PHY_ADDR, RegsC45::DA1E::LED_CNTRL.into(), led_val)
+    let mut led_cntr = LedCntrl(0x0);
+
+    // LED1: Yellow
+    led_cntr.set_led1_en(true);
+    led_cntr.set_led1_function(LedFunc::TxLevel2P4);
+    // LED0: Green
+    led_cntr.set_led0_en(true);
+    led_cntr.set_led0_function(LedFunc::LinkupTxRxActicity);
+
+    mac.write_cl45(MDIO_PHY_ADDR, RegsC45::DA1E::LED_CNTRL.into(), led_cntr.0)
         .await
         .unwrap();
 
     // Set ADIN1110 Interrupts, RX_READY and LINK_CHANGE
     // Enable interrupts LINK_CHANGE, TX_RDY, RX_RDY(P1), SPI_ERR
-    let imask0_val =
-        0x0000_1FBF & !(0 | IMASK0::TXFCSEM | IMASK0::PHYINTM | IMASK0::TXBOEM | IMASK0::RXBOEM | IMASK0::TXPEM);
-    mac.write_reg(sr::IMASK0, imask0_val).await.unwrap();
+    // Have to clear the mask the enable it.
+    let mut imask0_val = IMask0(0x0000_1FBF);
+    imask0_val.set_txfcsem(false);
+    imask0_val.set_phyintm(false);
+    imask0_val.set_txboem(false);
+    imask0_val.set_rxboem(false);
+    imask0_val.set_txpem(false);
+
+    mac.write_reg(sr::IMASK0, imask0_val.0).await.unwrap();
 
     // Set ADIN1110 Interrupts, RX_READY and LINK_CHANGE
     // Enable interrupts LINK_CHANGE, TX_RDY, RX_RDY(P1), SPI_ERR
-    let imask1_val = 0x43FA_1F1A
-        & !(0
-            | IMASK1::LINK_CHANGE_MASK
-            | IMASK1::P1_RX_RDY_MASK
-            | IMASK1::SPI_ERR_MASK
-            | IMASK1::TX_ECC_ERR_MASK
-            | IMASK1::RX_ECC_ERR_MASK);
-    mac.write_reg(sr::IMASK1, imask1_val).await.unwrap();
+    // Have to clear the mask the enable it.
+    let mut imask1_val = IMask1(0x43FA_1F1A);
+    imask1_val.set_link_change_mask(false);
+    imask1_val.set_p1_rx_rdy_mask(false);
+    imask1_val.set_spi_err_mask(false);
+    imask1_val.set_tx_ecc_err_mask(false);
+    imask1_val.set_rx_ecc_err_mask(false);
+
+    mac.write_reg(sr::IMASK1, imask1_val.0).await.unwrap();
 
     // Program mac address but also sets mac filters.
     mac.set_mac_addr(&mac_addr).await.unwrap();
