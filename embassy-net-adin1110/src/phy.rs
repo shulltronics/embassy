@@ -79,6 +79,7 @@ impl Default for Phy10BaseT1x {
 }
 
 impl Phy10BaseT1x {
+    /// Get the both parts of the PHYID.
     pub async fn get_id<MDIOBUS, MDE>(&self, mdiobus: &mut MDIOBUS) -> Result<u32, MDE>
     where
         MDIOBUS: MdioBus<Error = MDE>,
@@ -88,13 +89,13 @@ impl Phy10BaseT1x {
         phyid |= mdiobus.read_cl22(self.0, RegsC22::PHY_ID2 as u8).await? as u32;
         Ok(phyid)
     }
+
+    /// Get the Mean Squared Error Value.
     pub async fn get_sqi<MDIOBUS, MDE>(&self, mdiobus: &mut MDIOBUS) -> Result<u16, MDE>
     where
         MDIOBUS: MdioBus<Error = MDE>,
         MDE: core::fmt::Debug,
     {
-        mdiobus
-            .read_cl45(self.0, RegsC45::DA1::MSE_VAL.into())
-            .await
+        mdiobus.read_cl45(self.0, RegsC45::DA1::MSE_VAL.into()).await
     }
 }
