@@ -34,9 +34,9 @@ pub enum SpiRegisters {
     RX = 0x91,
 }
 
-impl Into<u16> for SpiRegisters {
-    fn into(self) -> u16 {
-        self as u16
+impl From<SpiRegisters> for u16 {
+    fn from(val: SpiRegisters) -> Self {
+        val as u16
     }
 }
 
@@ -275,9 +275,9 @@ pub enum LedFunc {
     Clk120MHz,
 }
 
-impl Into<u8> for LedFunc {
-    fn into(self) -> u8 {
-        self as u8
+impl From<LedFunc> for u8 {
+    fn from(val: LedFunc) -> Self {
+        val as u8
     }
 }
 
@@ -357,9 +357,9 @@ pub enum LedPol {
     ActiveLow,
 }
 
-impl Into<u8> for LedPol {
-    fn into(self) -> u8 {
-        self as u8
+impl From<LedPol> for u8 {
+    fn from(val: LedPol) -> Self {
+        val as u8
     }
 }
 
