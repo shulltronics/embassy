@@ -226,7 +226,7 @@ where
         Ok(packet_size as usize)
     }
 
-    pub async fn write_fifo(&mut self, frame: &mut [u8]) -> AEResult<(), SpiE> {
+    pub async fn write_fifo(&mut self, frame: &[u8]) -> AEResult<(), SpiE> {
         let header_len = self.header_write_len();
         // if packet.len() < header_len {
         //     return Err(AdinError::PACKET_TOO_SMALL);
@@ -661,7 +661,7 @@ pub async fn new<const N_RX: usize, const N_TX: usize, SPI: SpiDevice, INT: Wait
     // Program mac address but also sets mac filters.
     mac.set_mac_addr(&mac_addr).await.unwrap();
 
-    let (runner, device) = ch::new(&mut state.ch_state, mac_addr);
+    let (runner, device) = ch::new(&mut state.ch_state, ch::driver::HardwareAddress::Ethernet(mac_addr));
     (
         device,
         Runner {
