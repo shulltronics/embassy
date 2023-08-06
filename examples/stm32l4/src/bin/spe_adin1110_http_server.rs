@@ -31,7 +31,7 @@ use embedded_io::blocking::Write as bWrite;
 use hal::gpio::{Input, Level, Output, Speed};
 use hal::i2c::{self, I2c};
 use hal::rcc::{self};
-use hal::rng::Rng;
+use hal::rng::{self, Rng};
 use hal::{bind_interrupts, exti, pac, peripherals};
 use heapless::Vec;
 use rand::RngCore;
@@ -40,6 +40,7 @@ use {embassy_stm32 as hal, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     I2C3_EV => i2c::InterruptHandler<peripherals::I2C3>;
+    RNG => rng::InterruptHandler<peripherals::RNG>;
 });
 
 use embassy_net_adin1110::{self, Device, Runner, ADIN1110};
@@ -137,6 +138,9 @@ async fn main(spawner: Spawner) {
     let spe_spi_mosi = dp.PB15;
 
     // Don't turn the clock to high, clock must fit within the system clock as we get a runtime panic.
+    let mut spi_config = SPI_Config::default();
+    spi_config.frequency = Hertz(25_000_000);
+
     let spe_spi: SpeSpi = Spi::new(
         dp.SPI2,
         spe_spi_sclk,
@@ -144,8 +148,7 @@ async fn main(spawner: Spawner) {
         spe_spi_miso,
         dp.DMA1_CH1,
         dp.DMA1_CH2,
-        Hertz(25_000_000),
-        SPI_Config::default(),
+        spi_config,
     );
     let spe_spi = SpeSpiCs::new(spe_spi, spe_spi_cs_n, Delay);
 
@@ -179,7 +182,7 @@ async fn main(spawner: Spawner) {
     // Start ethernet task
     unwrap!(spawner.spawn(ethernet_task(runner)));
 
-    let mut rng = Rng::new(dp.RNG);
+    let mut rng = Rng::new(dp.RNG, Irqs);
     // Generate random seed
     let seed = rng.next_u64();
 
