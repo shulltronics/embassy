@@ -14,7 +14,7 @@ use embassy_net::{Stack, StackResources};
 use embassy_net_w5500::*;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
-use embassy_rp::peripherals::{PIN_17, PIN_20, PIN_21, SPI0};
+use embassy_rp::peripherals::{PIN_8, PIN_9, PIN_10, PIN_18, PIN_19, PIN_20, SPI0};
 use embassy_rp::spi::{Async, Config as SpiConfig, Spi};
 use embassy_time::{Delay, Duration};
 use embedded_hal_async::spi::ExclusiveDevice;
@@ -22,13 +22,14 @@ use embedded_io_async::Write;
 use rand::RngCore;
 use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
+
 #[embassy_executor::task]
 async fn ethernet_task(
     runner: Runner<
         'static,
-        ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static, PIN_17>, Delay>,
-        Input<'static, PIN_21>,
-        Output<'static, PIN_20>,
+        ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static, PIN_10>, Delay>,
+        Input<'static, PIN_9>,
+        Output<'static, PIN_8>,
     >,
 ) -> ! {
     runner.run().await
@@ -43,15 +44,15 @@ async fn net_task(stack: &'static Stack<Device<'static>>) -> ! {
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
     let mut rng = RoscRng;
-    let mut led = Output::new(p.PIN_25, Level::Low);
+    let mut led = Output::new(p.PIN_13, Level::Low);
 
     let mut spi_cfg = SpiConfig::default();
     spi_cfg.frequency = 50_000_000;
-    let (miso, mosi, clk) = (p.PIN_16, p.PIN_19, p.PIN_18);
+    let (miso, mosi, clk) = (p.PIN_20, p.PIN_19, p.PIN_18);
     let spi = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH0, p.DMA_CH1, spi_cfg);
-    let cs = Output::new(p.PIN_17, Level::High);
-    let w5500_int = Input::new(p.PIN_21, Pull::Up);
-    let w5500_reset = Output::new(p.PIN_20, Level::High);
+    let cs = Output::new(p.PIN_10, Level::High);
+    let w5500_int = Input::new(p.PIN_9, Pull::Up);
+    let w5500_reset = Output::new(p.PIN_8, Level::High);
 
     let mac_addr = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
     let state = make_static!(State::<8, 8>::new());
