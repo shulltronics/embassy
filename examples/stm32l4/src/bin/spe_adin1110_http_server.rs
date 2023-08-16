@@ -44,7 +44,7 @@ bind_interrupts!(struct Irqs {
 });
 
 use embassy_net_adin1110::{self, Device, Runner, ADIN1110};
-use embedded_hal_async::spi::ExclusiveDevice;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use hal::gpio::Pull;
 use hal::i2c::Config as I2C_Config;
 use hal::rcc::{ClockSrc, PLLClkDiv, PLLMul, PLLSource, PLLSrcDiv};
