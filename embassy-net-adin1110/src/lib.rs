@@ -680,8 +680,8 @@ mod tests {
 
     use embedded_hal_1::digital::{ErrorType, OutputPin};
     use embedded_hal_async::delay::DelayUs;
-    use embedded_hal_async::spi::ExclusiveDevice;
-    use embedded_hal_mock::spi::{Mock as SpiMock, Transaction as SpiTransaction};
+    use embedded_hal_bus::spi::ExclusiveDevice;
+    use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction as SpiTransaction};
 
     #[derive(Debug, Default)]
     struct CsPinMock {
@@ -732,11 +732,11 @@ mod tests {
             SpiTransaction::read_vec(vec![0x00, 0x00, 0x06, 0xC3]),
             SpiTransaction::flush(),
         ];
-        let spi = SpiMock::new(&expectations);
+        let mut spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
         let delay = MockDelay {};
-        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+        let spi_dev = ExclusiveDevice::new(spi.clone(), cs, delay);
         let mut spe = ADIN1110::new(spi_dev, false);
 
         // Read PHIID
@@ -750,6 +750,8 @@ mod tests {
             Ok(val) => assert_eq!(val, 0x000006C3),
             Err(_e) => panic!("Error:"),
         };
+
+        spi.done();
     }
 
     #[futures_test::test]
@@ -765,11 +767,11 @@ mod tests {
             SpiTransaction::read_vec(vec![0x00, 0x00, 0x06, 0xC3, 57]),
             SpiTransaction::flush(),
         ];
-        let spi = SpiMock::new(&expectations);
+        let mut spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
         let delay = MockDelay {};
-        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+        let spi_dev = ExclusiveDevice::new(spi.clone(), cs, delay);
 
         let mut spe = ADIN1110::new(spi_dev, true);
 
@@ -787,6 +789,8 @@ mod tests {
             Ok(val) => assert_eq!(val, 0x000006C3),
             Err(_e) => panic!("Error:"),
         };
+
+        spi.done();
     }
 
     #[futures_test::test]
@@ -796,16 +800,18 @@ mod tests {
             SpiTransaction::write_vec(vec![0xA0, 0x09, 0x12, 0x34, 0x56, 0x78]),
             SpiTransaction::flush(),
         ];
-        let spi = SpiMock::new(&expectations);
+        let mut spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
         let delay = MockDelay {};
-        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+        let spi_dev = ExclusiveDevice::new(spi.clone(), cs, delay);
 
         let mut spe = ADIN1110::new(spi_dev, false);
 
         // Write reg: 0x1FFF
         assert!(spe.write_reg(sr::STATUS1, 0x1234_5678).await.is_ok());
+
+        spi.done();
     }
 
     #[futures_test::test]
@@ -815,16 +821,18 @@ mod tests {
             SpiTransaction::write_vec(vec![0xA0, 0x09, 39, 0x12, 0x34, 0x56, 0x78, 28]),
             SpiTransaction::flush(),
         ];
-        let spi = SpiMock::new(&expectations);
+        let mut spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
         let delay = MockDelay {};
-        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+        let spi_dev = ExclusiveDevice::new(spi.clone(), cs, delay);
 
         let mut spe = ADIN1110::new(spi_dev, true);
 
         // Write reg: 0x1FFF
         assert!(spe.write_reg(sr::STATUS1, 0x1234_5678).await.is_ok());
+
+        spi.done();
     }
 
     #[test]
@@ -1223,14 +1231,16 @@ mod tests {
         expectations.push(SpiTransaction::write_vec(spi_packet.to_vec()));
         expectations.push(SpiTransaction::flush());
 
-        let spi = SpiMock::new(&expectations);
+        let mut spi = SpiMock::new(&expectations);
 
         let cs = CsPinMock::default();
         let delay = MockDelay {};
-        let spi_dev = ExclusiveDevice::new(spi, cs, delay);
+        let spi_dev = ExclusiveDevice::new(spi.clone(), cs, delay);
 
         let mut spe = ADIN1110::new(spi_dev, true);
 
         assert!(spe.write_fifo(&mut packet).await.is_ok());
+
+        spi.done();
     }
 }
