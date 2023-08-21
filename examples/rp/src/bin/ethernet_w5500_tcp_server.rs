@@ -11,13 +11,14 @@ use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::yield_now;
 use embassy_net::{Stack, StackResources};
-use embassy_net_w5500::*;
+use embassy_net_wiznet::chip::W5500;
+use embassy_net_wiznet::*;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::peripherals::{PIN_8, PIN_9, PIN_10, PIN_18, PIN_19, PIN_20, SPI0};
 use embassy_rp::spi::{Async, Config as SpiConfig, Spi};
 use embassy_time::{Delay, Duration};
-use embedded_hal_async::spi::ExclusiveDevice;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_io_async::Write;
 use rand::RngCore;
 use static_cell::make_static;
@@ -27,9 +28,10 @@ use {defmt_rtt as _, panic_probe as _};
 async fn ethernet_task(
     runner: Runner<
         'static,
-        ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static, PIN_10>, Delay>,
-        Input<'static, PIN_9>,
-        Output<'static, PIN_8>,
+        W5500,
+        ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static, PIN_17>, Delay>,
+        Input<'static, PIN_21>,
+        Output<'static, PIN_20>,
     >,
 ) -> ! {
     runner.run().await
@@ -56,7 +58,7 @@ async fn main(spawner: Spawner) {
 
     let mac_addr = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
     let state = make_static!(State::<8, 8>::new());
-    let (device, runner) = embassy_net_w5500::new(
+    let (device, runner) = embassy_net_wiznet::new(
         mac_addr,
         state,
         ExclusiveDevice::new(spi, cs, Delay),
