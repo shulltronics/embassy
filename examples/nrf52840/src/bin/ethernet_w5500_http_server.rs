@@ -38,6 +38,8 @@ use hal::rng;
 
 use rand::RngCore;
 
+use display_interface_spi::SPIInterface;
+
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<hal::peripherals::RNG>;
     SPIM3 => spim::InterruptHandler<hal::peripherals::SPI3>;
@@ -130,6 +132,13 @@ async fn main(spawner: Spawner) {
     let w5500_nint    = Input::new(w5500_int_pin, Pull::Up);
     let w5500_nrst    = Output::new(w5500_rst_pin, Level::High, OutputDrive::Standard);
     let w5500_spi_dev = SpiDevice::new(spi_bus, w5500_ncs);
+
+    // create another SPI device
+    let ili9341_ndc = Output::new(dp.P0_05, Level::High, OutputDrive::Standard);
+    let ili9341_ncs = Output::new(dp.P0_06, Level::High, OutputDrive::Standard);
+    let ili9341_spi_dev = SpiDevice::new(spi_bus, ili9341_ncs);
+    let display_iface = SPIInterface::new(ili9341_spi_dev, ili9341_ndc);
+    //let display = Ili9341::new(display_iface, ili9341_rst, Delay);
 
     // Create the W5500 driver
     let mac_addr: [u8; 6] = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
