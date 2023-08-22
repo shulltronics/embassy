@@ -24,8 +24,8 @@ use embassy_futures::yield_now;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{Ipv4Address, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_time::{Timer, Delay, Duration};
-//use embedded_hal_async::spi::ExclusiveDevice;
-use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
+use embedded_hal_bus::spi::ExclusiveDevice;
+//use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embedded_io::Write as bWrite;
 use embedded_io_async::Write;
 
@@ -59,8 +59,8 @@ static SPI_BUS: SpiBusShared = StaticCell::new();
 type StatusLed  = Output<'static, hal::peripherals::P1_15>;
 type BatteryAdc = saadc::Saadc<'static, 1>;
 type W5500Cs    = Output<'static, hal::peripherals::P0_27>;
-//type W5500Spi   = ExclusiveDevice<hal::spim::Spim<'static, hal::peripherals::SPI3>, W5500Cs, Delay>;
-type W5500Spi   = SpiDevice<'static, ThreadModeRawMutex, spim::Spim<'static, hal::peripherals::SPI3>, W5500Cs>;
+type W5500Spi   = ExclusiveDevice<hal::spim::Spim<'static, hal::peripherals::SPI3>, W5500Cs, Delay>;
+//type W5500Spi   = SpiDevice<'static, ThreadModeRawMutex, spim::Spim<'static, hal::peripherals::SPI3>, W5500Cs>;
 type W5500Int   = Input<'static, hal::peripherals::P0_26>;
 type W5500Rst   = Output<'static, hal::peripherals::P0_07>;
 
@@ -122,8 +122,8 @@ async fn main(spawner: Spawner) {
     let mut config   = spim::Config::default();
     config.frequency = spim::Frequency::M16;
     let spi_bus      = spim::Spim::new(dp.SPI3, Irqs, spi_sclk_pin, spi_miso_pin, spi_mosi_pin, config);
-    let spi_bus      = Mutex::<ThreadModeRawMutex, _>::new(spi_bus);
-    let spi_bus      = SPI_BUS.init(spi_bus);
+    //let spi_bus      = Mutex::<ThreadModeRawMutex, _>::new(spi_bus);
+    //let spi_bus      = SPI_BUS.init(spi_bus);
 
     // setup the W5500 SpiDevice, these pins correspond to the Particle Ethernet FeatherWing
     let w5500_cs_pin  = dp.P0_27;
@@ -132,7 +132,7 @@ async fn main(spawner: Spawner) {
     let w5500_ncs     = Output::new(w5500_cs_pin, Level::High, OutputDrive::Standard);
     let w5500_nint    = Input::new(w5500_int_pin, Pull::Up);
     let w5500_nrst    = Output::new(w5500_rst_pin, Level::High, OutputDrive::Standard);
-    let w5500_spi_dev = SpiDevice::new(spi_bus, w5500_ncs);
+    //let w5500_spi_dev = SpiDevice::new(spi_bus, w5500_ncs);
 
     // create another SPI device
     //let ili9341_ndc = Output::new(dp.P0_05, Level::High, OutputDrive::Standard);
@@ -147,8 +147,8 @@ async fn main(spawner: Spawner) {
     let (device, runner) = embassy_net_wiznet::new(
         mac_addr,
         state,
-        //ExclusiveDevice::new(w5500_spi, w5500_ncs, Delay),
-        w5500_spi_dev,
+        ExclusiveDevice::new(spi_bus, w5500_ncs, Delay),
+        //w5500_spi_dev,
         w5500_nint,
         w5500_nrst,
     )
